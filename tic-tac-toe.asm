@@ -1,10 +1,12 @@
 format ELF64 executable
 
-SYS_read  equ 0
-SYS_write equ 1
-SYS_open equ 2
-SYS_close    equ 3
-SYS_exit  equ 60
+SYS_read   equ 0
+SYS_write  equ 1
+SYS_open   equ 2
+SYS_close  equ 3
+SYS_exit   equ 60
+SYS_chmod  equ 90
+SYS_fchmod equ 91
 
 STDIN        equ 0
 STDOUT       equ 1
@@ -17,11 +19,22 @@ EXIT_SUCCESS equ 0
 EXIT_FAILURE equ 1
 
 
-O_RDONLY equ 00
-O_WRONLY equ 01
-O_RDWR   equ 02
-O_CREAT  equ 0100
-readfile = 1
+O_RDONLY equ 0o
+O_WRONLY equ 1o
+O_RDWR   equ 2o
+O_CREAT  equ 100o
+
+S_IRUSR equ 0400o
+S_IWUSR equ 0200o
+S_IXUSR equ 0100o
+S_IRGRP equ 0040o
+S_IWGRP equ 0020o
+S_IXGRP equ 0010o
+S_IROTH equ 0004o
+S_IWOTH equ 0002o
+S_IXOTH equ 0001o
+
+readfile = 0
 
 macro syscall1 syscallId, a
 {
@@ -50,15 +63,23 @@ macro write fd, buf, count
     cmp rax, 0 ;; Check for errors
     jl error
 }
-macro read fd, buf, count
+macro read fd, buf, count, buff_len_pointer
 {
     syscall3 SYS_read, fd, buf, count
     cmp rax, 0 ;; Check for errors
     jl error
+    mov qword [buff_len_pointer], rax ;; Writes the number of characters read from file to memory
 }
-macro open filename, flags, mode
+macro open filename, flags, mode, fd_pointer
 {
     syscall3 SYS_open, filename, flags, mode
+    cmp rax, 0 ;; Check for errors
+    jl error
+    mov qword [fd_pointer], rax ;; Place file descriptor of opened file in memory
+}
+macro fchmod fd, mode
+{
+    syscall2 SYS_fchmod, fd, mode
     cmp rax, 0 ;; Check for errors
     jl error
 }
@@ -77,28 +98,20 @@ main:
     ;; Conditionally compile different sections of code
 if readfile = 1
     ;; Open file
-    open text_file_path, (O_CREAT or O_RDWR), 0002
-    mov qword [text_fd], rax ;; Place file descriptor of opened file in memory
-
+    open text_file_path, (O_CREAT or O_RDWR), 0002, text_fd
     ;; Read contents of file into buffer
-    read  [text_fd], file_buff, FILE_BUFFERSIZE ;; Reads values from file and places them in buffer
-    mov qword [file_buff_len], rax ;; Writes the number of characters read from file to memory
-
+    read  [text_fd], file_buff, FILE_BUFFERSIZE, file_buff_len ;; Reads values from file and places them in buffer
     ;; Write contents of file buffer to stdout
     write STDOUT, file_buff, [file_buff_len]
-
 else
     ;; Open file
-    open text_file_path, (O_CREAT or O_RDWR), 0002
-    mov qword [text_fd], rax ;; Place file descriptor of opened file in memory
-
+    open text_file_path, (O_CREAT or O_RDWR), 0002, text_fd
     ;; Read contents of stdin into buffer
-    read  STDIN, stdin_buff, STDIN_BUFFERSIZE ;; Reads values from stdin and places them in buffer
-    mov qword [stdin_buff_len], rax ;; Writes the number of characters read from stdin to memory
-
+    read  STDIN, stdin_buff, STDIN_BUFFERSIZE, stdin_buff_len ;; Reads values from stdin and places them in buffer
     ;; Write contents of stdin buffer to file
     write [text_fd], stdin_buff, [stdin_buff_len]
-
+    ;; Set permissions of file
+    fchmod [text_fd], (S_IRUSR or S_IWUSR)
 end if
 
     write STDOUT, msg, msg_len
